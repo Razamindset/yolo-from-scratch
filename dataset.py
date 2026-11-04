@@ -100,11 +100,14 @@ class VOCYolo(Dataset):
         img = Image.open(self.root / "JPEGImages" / f"{self.ids[idx]}.jpg").convert("RGB")
         labels = self.labels[idx].clone()  # clone: augmentation edits in place
  
-        img = self.resize(img)
+        img = self.tf(img)
         if self.augment:
             img, labels = self._augment(img, labels)
+
+        img = TF.to_tensor(img)
+        img = TF.normalize(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
  
-        return TF.to_tensor(img), self.encode(labels)
+        return img, self.encode(labels)
 
 
 if __name__ == "__main__":
