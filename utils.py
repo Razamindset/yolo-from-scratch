@@ -1,6 +1,5 @@
 import xml.etree.ElementTree as ET
 import torch
-
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
@@ -147,7 +146,6 @@ def non_max_suppression(bboxes, iou_threshold=0.5, threshold=0.4):
         bboxes_after_nms.append(chosen_box)
 
     return bboxes_after_nms
-
 
 
 def plot_boxes(image, boxes, class_names):

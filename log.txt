@@ -1,0 +1,114 @@
+================================================================================
+YOLOv1 FROM SCRATCH - ARCHITECTURAL & CONCEPTUAL PIPELINE LOG
+================================================================================
+
+1. DATA PREPROCESSING & AUGMENTATION
+--------------------------------------------------------------------------------
+- Input Resolution: 448 x 448 pixels (RGB).
+- Augmentations:
+  * Random Horizontal Flip (p=0.5): flips image and reflects box center: cx = 1.0 - cx.
+  * Color Jitter (brightness=0.3, contrast=0.3, saturation=0.3).
+- Tensor Conversion & Normalization:
+  * TF.to_tensor() scales pixels to [0.0, 1.0].
+  * TF.normalize() applies ImageNet statistics:
+      mean = [0.485, 0.456, 0.406]
+      std  = [0.229, 0.224, 0.225]
+
+
+2. DATASET TARGET ENCODING (Pascal VOC -> 7x7 Grid)
+--------------------------------------------------------------------------------
+- The image is divided into S x S = 7 x 7 = 49 grid cells.
+- Ground truth XML contains pixel coordinates: (xmin, ymin, xmax, ymax).
+- Normalized to [0, 1] relative to image dimensions:
+    cx = (xmin + xmax) / (2 * W)
+    cy = (ymin + ymax) / (2 * H)
+    w  = (xmax - xmin) / W
+    h  = (ymax - ymin) / H
+- Responsible Cell Assignment:
+    col = int(cx * S)
+    row = int(cy * S)
+- Cell-relative offset stored in target tensor:
+    x_cell = cx * S - col   (in [0, 1))
+    y_cell = cy * S - row   (in [0, 1))
+    w_image = w             (in [0, 1])
+    h_image = h             (in [0, 1])
+    confidence = 1.0
+- Target Tensor Layout: Shape (7, 7, 30)
+    [0:5]   -> Box 1 target: [x, y, w, h, 1.0]
+    [5:10]  -> Box 2 target: [x, y, w, h, 1.0] (duplicated)
+    [10:30] -> One-hot class vector (20 VOC classes)
+- Limitation: If two objects share the same cell center, only one is kept.
+
+
+3. MODEL ARCHITECTURE
+--------------------------------------------------------------------------------
+- Backbone: Pretrained ResNet-34 (truncated before avgpool/fc).
+  * Input:  (Batch, 3, 448, 448)
+  * Output: (Batch, 512, 14, 14)
+- Detection Head:
+  * Conv2d(512 -> 1024, kernel=3, padding=1) + BatchNorm2d + LeakyReLU(0.1)
+  * MaxPool2d(2) -> downsamples 14x14 to 7x7
+  * Conv2d(1024 -> 30, kernel=1)
+  * Permute & Activation:
+      torch.sigmoid(x.permute(0, 2, 3, 1)) -> Shape (Batch, 7, 7, 30)
+- Note on Activation:
+  * We use torch.sigmoid (NOT softmax) over all 30 outputs.
+  * This independently bounds all predictions in (0, 1):
+      - x, y offsets in (0, 1)
+      - w, h sizes in (0, 1)
+      - confidence in (0, 1)
+      - multi-label class probabilities in (0, 1)
+
+
+4. LOSS FUNCTION (YoloLoss)
+--------------------------------------------------------------------------------
+- Note: IoU is NOT the loss! IoU is only used to select the responsible predictor.
+- Responsible Predictor Selection:
+  * In each cell containing an object (target[..., 4] == 1):
+      iou1 = IoU(predicted_box1, ground_truth)
+      iou2 = IoU(predicted_box2, ground_truth)
+  * The box with higher IoU is assigned responsibility for this object.
+  * The other box is designated as "no-object".
+
+- Total Loss = Sum of 5 MSE Components:
+  1. Coordinate Center Loss (x, y):
+     lambda_coord * sum( exists_box * ( (x - x_hat)^2 + (y - y_hat)^2 ) )
+     [lambda_coord = 5.0, only for the responsible box]
+
+  2. Box Size Loss (sqrt(w), sqrt(h)):
+     lambda_coord * sum( exists_box * ( (sqrt(w) - sqrt(w_hat))^2 + (sqrt(h) - sqrt(h_hat))^2 ) )
+     [lambda_coord = 5.0, clamp w >= 1e-6 to avoid NaN gradients]
+
+  3. Object Confidence Loss:
+     sum( exists_box * (conf - 1.0)^2 )
+     [Target = 1.0, only for the responsible box]
+
+  4. No-Object Confidence Loss:
+     lambda_noobj * sum( noobj_mask * (conf - 0.0)^2 )
+     [lambda_noobj = 0.5; penalizes ALL boxes in empty cells PLUS the LOSING box in object cells]
+
+  5. Classification Loss:
+     sum( exists_box * sum_c( (p_c - p_c_hat)^2 ) )
+     [Only for cells where an object exists]
+
+- The final sum is normalized by batch size N.
+
+
+5. POST-PROCESSING & VISUALIZATION (Inference)
+--------------------------------------------------------------------------------
+- Step 1: Decode (cellboxes_to_boxes):
+    x_global = (col + x) / 7
+    y_global = (row + y) / 7
+    Convert center (x, y, w, h) -> corners (x1, y1, x2, y2).
+    Score = box_confidence * max(class_probabilities).
+    Output: 98 candidate boxes per image: [class_idx, score, x1, y1, x2, y2].
+
+- Step 2: Clean (non_max_suppression):
+    1. Filter out candidate boxes with score < threshold (e.g. < 0.4).
+    2. Sort surviving boxes by confidence descending.
+    3. Remove overlapping duplicate boxes of the same class with IoU > 0.5.
+
+- Step 3: Display (plot_boxes):
+    Un-normalize image back to [0, 1] RGB, scale corners by image (H, W),
+    and render bounding boxes with labels using matplotlib.
+================================================================================
