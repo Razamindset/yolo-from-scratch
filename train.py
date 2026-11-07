@@ -10,8 +10,7 @@ from loss import YoloLoss
 EPOCHS = 20
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-
-loss = YoloLoss()
+criterion = YoloLoss()
 
 def main():
     train_ds = VOCYolo(ROOT, split="trainval", augment=True)
@@ -27,7 +26,7 @@ def main():
 
     for step in range(100):
         pred = model(imgs)
-        loss = loss(pred, targets)
+        loss = criterion(pred, targets)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()

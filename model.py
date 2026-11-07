@@ -15,11 +15,11 @@ class YOLOv1(nn.Module):
             nn.Conv2d(kernel_size=1, in_channels=1024, out_channels=30)
         )
 
-
     def forward(self, x):
         x = self.backbone(x)
         x = self.head(x)
         return torch.sigmoid(x.permute(0, 2, 3, 1))
 
-model = YOLOv1()
-print(model(torch.rand(2, 3, 448, 448)).shape)   # expect (2, 7, 7, 30)
+if __name__ == "__main__":
+    model = YOLOv1()
+    print(model(torch.rand(2, 3, 448, 448)).shape)   # expect (2, 7, 7, 30)
