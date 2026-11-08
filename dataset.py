@@ -41,8 +41,8 @@ class VOCYolo(Dataset):
         self.tf = T.Resize((img_size, img_size))
         self.jitter = T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3)
 
+        # Lazy loading: only read the text file of IDs here (takes 0.005s)
         self.ids = (self.root / "ImageSets" / "Main" / f"{split}.txt").read_text().split()
-        self.labels = [self._load_labels(i) for i in self.ids]
 
     def _load_labels(self, img_id):
         """Returns a (N, 5) tensor of [class_idx, cx, cy, w, h], all normalised to the image."""
@@ -97,9 +97,12 @@ class VOCYolo(Dataset):
         return len(self.ids)
 
     def __getitem__(self, idx):
-        img = Image.open(self.root / "JPEGImages" / f"{self.ids[idx]}.jpg").convert("RGB")
-        labels = self.labels[idx].clone()  # clone: augmentation edits in place
- 
+        img_id = self.ids[idx]
+        img = Image.open(self.root / "JPEGImages" / f"{img_id}.jpg").convert("RGB")
+        
+        # Load label on-demand; multi-worker DataLoader handles this in parallel across CPU cores
+        labels = self._load_labels(img_id)
+
         img = self.tf(img)
         if self.augment:
             img, labels = self._augment(img, labels)
@@ -118,4 +121,4 @@ if __name__ == "__main__":
     print(f"samples: {len(ds)}")
     print(f"image:   {tuple(img.shape)}")
     print(f"target:  {tuple(target.shape)}")
-    print(f"objects encoded: {int(target[..., 4].sum())}  (raw labels: {len(ds.labels[0])})")
+    print(f"objects encoded: {int(target[..., 4].sum())}  (raw labels: {len(ds._load_labels(ds.ids[0]))})")
