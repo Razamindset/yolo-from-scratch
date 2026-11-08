@@ -61,11 +61,72 @@ class VOCYolo(Dataset):
             ])
         return torch.tensor(rows, dtype=torch.float32).reshape(-1, 5)
 
+    def _random_scale_sample(self, img, labels, scale_range=(0.8, 1.2)):
+        """
+        Randomly scales the image and adjusts bounding box coordinates.
+        - scale <= 1.0: Zoom-out with random offset placement on a neutral padded canvas.
+        - scale > 1.0:  Zoom-in / random crop patch sampling with box filtering.
+        """
+        scale = random.uniform(scale_range[0], scale_range[1])
+        W, H = img.size
+
+        if scale <= 1.0:
+            # Zoom-out / random padding placement
+            new_w, new_h = max(int(W * scale), 1), max(int(H * scale), 1)
+            resized_img = img.resize((new_w, new_h), Image.BILINEAR)
+
+            dx = random.randint(0, W - new_w)
+            dy = random.randint(0, H - new_h)
+
+            canvas = Image.new("RGB", (W, H), (124, 116, 104))
+            canvas.paste(resized_img, (dx, dy))
+
+            new_labels = labels.clone()
+            new_labels[:, 1] = labels[:, 1] * scale + (dx / W)
+            new_labels[:, 2] = labels[:, 2] * scale + (dy / H)
+            new_labels[:, 3] = labels[:, 3] * scale
+            new_labels[:, 4] = labels[:, 4] * scale
+            return canvas, new_labels
+        else:
+            # Zoom-in / random crop patch sampling
+            new_w, new_h = int(W * scale), int(H * scale)
+            resized_img = img.resize((new_w, new_h), Image.BILINEAR)
+
+            dx = random.randint(0, new_w - W)
+            dy = random.randint(0, new_h - H)
+
+            cropped_img = resized_img.crop((dx, dy, dx + W, dy + H))
+
+            cx_new = labels[:, 1] * scale - (dx / W)
+            cy_new = labels[:, 2] * scale - (dy / H)
+            w_new = labels[:, 3] * scale
+            h_new = labels[:, 4] * scale
+
+            # Keep boxes whose centers remain within the crop
+            valid_mask = (cx_new > 0.02) & (cx_new < 0.98) & (cy_new > 0.02) & (cy_new < 0.98)
+            if valid_mask.sum() > 0:
+                new_labels = torch.stack([
+                    labels[valid_mask, 0],
+                    cx_new[valid_mask].clamp(0.01, 0.99),
+                    cy_new[valid_mask].clamp(0.01, 0.99),
+                    w_new[valid_mask].clamp(0.01, 0.99),
+                    h_new[valid_mask].clamp(0.01, 0.99)
+                ], dim=1)
+                return cropped_img, new_labels
+            else:
+                return img, labels
+
     def _augment(self, img, labels):
-        if random.random() < 0.5:
+        # 1. Random Scaling & Patch Sampling (50% probability)
+        if random.random() < 0.5 and len(labels) > 0:
+            img, labels = self._random_scale_sample(img, labels, scale_range=(0.8, 1.2))
+
+        # 2. Random Horizontal Flip (50% probability)
+        if random.random() < 0.5 and len(labels) > 0:
             img = TF.hflip(img)
             labels[:, 1] = 1.0 - labels[:, 1] # if img is flipped then boxes are flipped also
 
+        # 3. Color Jitter
         img = self.jitter(img)
 
         return img, labels

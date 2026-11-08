@@ -112,3 +112,71 @@ YOLOv1 FROM SCRATCH - ARCHITECTURAL & CONCEPTUAL PIPELINE LOG
     Un-normalize image back to [0, 1] RGB, scale corners by image (H, W),
     and render bounding boxes with labels using matplotlib.
 ================================================================================
+
+
+6. TRAINING EXPERIMENT #1 RESULTS (20 Epochs on Dual T4)
+--------------------------------------------------------------------------------
+- Hardware: Kaggle Dual NVIDIA T4 GPUs (Batch Size: 32, FP16 AMP)
+- Optimizer: Adam (Backbone LR: 2e-5, Head LR: 2e-4, Weight Decay: 1e-4)
+- Scheduler: ReduceLROnPlateau (factor=0.5, patience=2)
+- Training Progression:
+    * Epoch 01: Train Loss = 6.8410 | Val Loss = 4.7482  [Best]
+    * Epoch 02: Train Loss = 4.0512 | Val Loss = 4.2196  [Best]
+    * Epoch 03: Train Loss = 3.5050 | Val Loss = 3.9743  [Best]
+    * Epoch 04: Train Loss = 3.0994 | Val Loss = 3.8685  [Best]
+    * Epoch 09: Train Loss = 2.0054 | Val Loss = 3.7616  [Best]
+    * Epoch 10-12: Val loss plateaus around 3.77 - 3.87 -> LR Scheduler triggers
+    * Epoch 13: Train Loss = 1.4840 | Val Loss = 3.7505  [GLOBAL BEST CHECKPOINT SAVED]
+    * Epoch 14: Train Loss = 1.3533 | Val Loss = 3.7563
+    * Epoch 15: Train Loss = 1.2879 | Val Loss = 3.7743
+    * Epoch 16: Train Loss = 1.2327 | Val Loss = 3.7760
+    * Epoch 17: Train Loss = 1.1684 | Val Loss = 3.7946  (LR drops to 5e-5 / 5e-6)
+    * Epoch 18: Train Loss = 1.1251 | Val Loss = 3.7571
+    * Epoch 19: Train Loss = 1.0760 | Val Loss = 3.7849
+    * Epoch 20: Train Loss = 1.0336 | Val Loss = 3.7798  (Final LR: 2.5e-5 / 2.5e-6)
+
+- Summary of Convergence:
+    * Training loss dropped smoothly from 6.84 -> 1.03.
+    * Validation loss reached its global minimum at Epoch 13 (3.7505).
+    * From Epoch 13 onward, mild overfitting occurred: train loss kept falling while val loss stayed flat (~3.75 - 3.79).
+    * Best weights safely locked in /kaggle/working/yolov1_best.pt from Epoch 13.
+
+
+7. QUALITATIVE DETECTION & ERROR ANALYSIS
+--------------------------------------------------------------------------------
+Case A: Single Dominant Object (Red Convertible Car)
+- Result: OUTSTANDING.
+- Bounding box accurately hugs the entire car boundaries (score: 0.51, class: car).
+- Clean single detection with zero false positive boxes in the background.
+
+Case B: Multiple / Clustered Objects (Knight Riding a Horse + Bystanders)
+- Result: Mixed / Multiple Duplicate Detections.
+- Detections produced:
+    * Person: 0.88 (upper torso of rider)
+    * Person: 0.55 (rider + horse neck)
+    * Person: 0.36 (horse flank/legs)
+    * Person: 0.61 (people standing in background)
+- Missed: The horse itself was not classified as a horse.
+
+Root Cause Analysis (The Fundamental YOLOv1 Architectural Limitations):
+1. The "One Class per Grid Cell" Constraint:
+   In YOLOv1, each 7x7 cell predicts 2 boxes, but shares ONLY ONE 20-class probability distribution.
+   When a rider (person) sits on a horse, their centers fall into the exact same 7x7 grid cell.
+   YOLOv1 is mathematically forced to assign one class to that cell. If "person" wins, both
+   boxes predicted by that cell are labeled "person", making simultaneous detection of both
+   rider and horse impossible for that cell.
+
+2. Coarse Spatial Resolution:
+   With an input of 448x448 and a 7x7 grid, each cell covers 64x64 pixels. Any clustered or
+   overlapping objects in that 64x64 window compete for the single cell target.
+
+3. Low Confidence Filtering:
+   The box on the horse legs is "person: 0.36" (barely above CONF_THRESHOLD=0.35).
+   Increasing CONF_THRESHOLD to 0.45 or 0.50 immediately eliminates this hallucination.
+
+Historical Research Context:
+This exact failure mode is what prompted Joseph Redmon to design YOLOv2 (YOLO9000) and YOLOv3:
+- YOLOv2 introduced Anchor Boxes: each anchor box has its OWN independent class predictions.
+- YOLOv3 introduced Multi-Scale Feature Pyramids (13x13, 26x26, 52x52): fine grids capture
+  small and overlapping objects easily.
+================================================================================

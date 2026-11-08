@@ -100,11 +100,13 @@ class YoloLoss(nn.Module):
         )
 
         # -------------------------------------------------------------
-        # 4. Loss Term 3: Object Confidence Loss
+        # 4. Loss Term 3: IoU-Calibrated Object Confidence Loss
         # -------------------------------------------------------------
-        # Target confidence is 1.0 (or target IoU) for the responsible box
+        # Target confidence is the actual IoU between responsible box and GT
+        # (detached so gradients do not backprop through the IoU calculation)
+        best_iou = torch.maximum(iou1, iou2).detach()
         loss_obj = torch.sum(
-            exists_box * (pred_responsible_conf - 1)**2
+            exists_box * (pred_responsible_conf - best_iou) ** 2
         )
 
         # -------------------------------------------------------------

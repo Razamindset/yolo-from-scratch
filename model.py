@@ -11,7 +11,10 @@ class YOLOv1(nn.Module):
             nn.Conv2d(kernel_size=3, in_channels=512, out_channels=1024, padding=1),
             nn.BatchNorm2d(1024),
             nn.LeakyReLU(0.1),
-            nn.MaxPool2d(2),                       # 14 -> 7
+            # Learnable stride-2 downsampling: preserves spatial feature gradients (14x14 -> 7x7)
+            nn.Conv2d(kernel_size=3, in_channels=1024, out_channels=1024, stride=2, padding=1),
+            nn.BatchNorm2d(1024),
+            nn.LeakyReLU(0.1),
             nn.Conv2d(kernel_size=1, in_channels=1024, out_channels=30)
         )
 
