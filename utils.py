@@ -1,5 +1,6 @@
 import xml.etree.ElementTree as ET
 import torch
+import torch.nn as nn
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
@@ -190,7 +191,20 @@ def plot_boxes(image, boxes, class_names):
 
     plt.axis("off")
     plt.show()
-    
+
+
+def save_checkpoint(state, filename):
+    print(f"\n=> Saving best model checkpoint to {filename}...")
+    torch.save(state, filename)
+
+def load_checkpoint(checkpoint_path, model, optimizer=None):
+    print(f"=> Loading checkpoint from {checkpoint_path}...")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    # Unwrap DataParallel if present
+    raw_model = model.module if isinstance(model, nn.DataParallel) else model
+    raw_model.load_state_dict(checkpoint["state_dict"])
+    if optimizer and "optimizer" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer"])
 
 if __name__ == "__main__":
     dummy_pred = torch.rand(1, 7, 7, 30)

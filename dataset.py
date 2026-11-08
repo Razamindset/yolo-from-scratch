@@ -9,7 +9,7 @@ w, h : box size relative to the whole image, in [0, 1]
 """
 
 from utils import parse_xml
-from config import ROOT
+from config import DATA_DIR
 from collections import Counter
 from tqdm import tqdm
 from torch.utils.data import Dataset
@@ -111,9 +111,9 @@ class VOCYolo(Dataset):
 
 
 if __name__ == "__main__":
-    from config import ROOT
+    from config import DATA_DIR
  
-    ds = VOCYolo(ROOT, split="trainval", augment=True)
+    ds = VOCYolo(DATA_DIR, split="trainval", augment=True)
     img, target = ds[0]
     print(f"samples: {len(ds)}")
     print(f"image:   {tuple(img.shape)}")
